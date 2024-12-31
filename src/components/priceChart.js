@@ -144,11 +144,11 @@ const PriceChart = () => {
     if (active && payload && payload.length) {
       const { price, marketCap, volume } = payload[0].payload;
       return (
-        <div className="chart-tooltip p-3 rounded-lg">
+        <div className="bg-[var(--theme-bg-secondary)] border border-[var(--theme-border)] p-3 rounded-lg">
           <p className="text-sm text-[var(--theme-text-secondary)] mb-1">
             {formatTime(label, selectedInterval)}
           </p>
-          <p className="text-sm font-bold text-[var(--theme-text-primary)]">
+          <p className="text-sm font-bold text-[var(--theme-text-primary)] mt-1">
             Price: ${formatValue(price, decimals)}
           </p>
           <p className="text-sm font-bold text-[var(--theme-text-primary)] mt-1">
@@ -164,16 +164,18 @@ const PriceChart = () => {
   };
 
   return (
-    <Card className="chart-card w-full">
+    <Card>
       <CardHeader className="space-y-4">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-4">
-            <CardTitle className="text-xl text-[var(--theme-text-primary)]">
+            <CardTitle>
               Price History
             </CardTitle>
             <button
               onClick={() => setIsMarketCap(!isMarketCap)}
-              className="btn btn-secondary text-sm"
+              className="px-3 py-1.5 text-sm font-medium rounded-md
+                bg-[var(--theme-bg-tertiary)] text-[var(--theme-text-secondary)]
+                hover:text-[var(--theme-text-primary)] transition-colors"
             >
               Show in {isMarketCap ? 'Price' : 'Market Cap'}
             </button>
@@ -183,10 +185,10 @@ const PriceChart = () => {
               <button
                 key={interval}
                 onClick={() => setSelectedInterval(interval)}
-                className={`btn ${
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                   selectedInterval === interval
-                    ? 'btn-primary'
-                    : 'btn-secondary'
+                    ? 'bg-[var(--theme-accent)] text-white'
+                    : 'bg-[var(--theme-bg-tertiary)] text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]'
                 }`}
               >
                 {interval}
@@ -204,7 +206,7 @@ const PriceChart = () => {
             >
               <CartesianGrid 
                 strokeDasharray="3 3" 
-                className="chart-grid" 
+                stroke="var(--theme-border)"
                 opacity={0.1}
               />
               <XAxis 

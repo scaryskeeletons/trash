@@ -14,6 +14,25 @@ const TIMEFRAMES = {
   '24H': '24h',
 };
 
+const TokenImage = ({ src, alt }) => {
+  const [hasError, setHasError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  return (
+    <div className="w-8 h-8 rounded-full bg-[var(--theme-bg-tertiary)] flex items-center justify-center">
+      {src && !hasError && (
+        <img
+          src={src}
+          alt={alt}
+          className={`w-8 h-8 rounded-full ${isLoading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
+          onError={() => setHasError(true)}
+          onLoad={() => setIsLoading(false)}
+        />
+      )}
+    </div>
+  );
+};
+
 const TrendingTokens = () => {
   const { fetchFromApi, setSelectedToken } = useContext(ApiContext);
   const [tokens, setTokens] = useState([]);
@@ -65,7 +84,6 @@ const TrendingTokens = () => {
 
   const handleAIAnalysis = (rankMap, direction) => {
     setAiDirection(direction);
-    // Update tokens with AI ranking
     const updatedTokens = tokens.map(token => ({
       ...token,
       aiRank: rankMap.get(token.token.symbol) || Number.MAX_VALUE
@@ -80,10 +98,12 @@ const TrendingTokens = () => {
 
   const SortIcon = ({ column }) => {
     if (sortConfig.key !== column) {
-      return <span className="ml-1 text-gray-400 opacity-0 group-hover:opacity-100">↕</span>;
+      return <span className="ml-1 text-[var(--theme-text-tertiary)] opacity-0 group-hover:opacity-100">↕</span>;
     }
     return (
-      <span className={`ml-1 ${column === 'aiRank' ? (aiDirection === 'best' ? 'text-green-500' : 'text-red-500') : 'text-[var(--theme-accent)]'}`}>
+      <span className={`ml-1 ${column === 'aiRank' ? 
+        (aiDirection === 'best' ? 'text-green-500' : 'text-red-500') : 
+        'text-[var(--theme-accent)]'}`}>
         {sortConfig.direction === 'asc' ? '↑' : '↓'}
       </span>
     );
@@ -111,7 +131,7 @@ const TrendingTokens = () => {
   };
 
   const formatPercentage = (value) => {
-    if (!value || isNaN(value)) return <span className="text-gray-400">0.00%</span>;
+    if (!value || isNaN(value)) return <span className="text-[var(--theme-text-tertiary)]">0.00%</span>;
     const formatted = parseFloat(value).toFixed(2);
     const isPositive = value > 0;
     return (
@@ -164,7 +184,7 @@ const TrendingTokens = () => {
         mint: token.token.mint,
         name: token.token.name,
         symbol: token.token.symbol,
-        image: token.token.image || '/placeholder.png',
+        image: token.token.image !== '/placeholder.png' ? token.token.image : null,
         price,
         marketCap,
         priceChange,
@@ -205,10 +225,10 @@ const TrendingTokens = () => {
   return (
     <>
       <AIScan 
-  tokens={processedTokens} 
-  onAnalysisComplete={handleAIAnalysis}
-  onTokenSelect={handleTokenSelect}
-/>
+        tokens={processedTokens} 
+        onAnalysisComplete={handleAIAnalysis}
+        onTokenSelect={handleTokenSelect}
+      />
       <Card className="mt-6">
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -289,14 +309,9 @@ const TrendingTokens = () => {
                       </td>
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
-                          <img
-                            src={token.image}
+                          <TokenImage 
+                            src={token.image} 
                             alt={token.name}
-                            className="w-8 h-8 rounded-full"
-                            onError={(e) => {
-                              e.target.onerror = null;
-                              e.target.src = '/placeholder.png';
-                            }}
                           />
                           <div>
                             <div className="font-medium text-[var(--theme-text-primary)]">

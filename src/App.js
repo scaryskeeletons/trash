@@ -1,4 +1,4 @@
-import React, { useState, createContext, useCallback } from 'react';
+import React, { useState, createContext, useCallback, useEffect } from 'react';
 import TokenHeader from './components/tokenHeader';
 import TokenMetrics from './components/tokenMetrics';
 import PriceChart from './components/priceChart';
@@ -15,6 +15,12 @@ const SOL_API_BASE_URL = process.env.REACT_APP_SOL_API_BASE_URL;
 const App = () => {
   const [selectedToken, setSelectedToken] = useState(null);
   const [error, setError] = useState(null);
+  const [showTrending, setShowTrending] = useState(true);
+  
+  // Reset showTrending when selectedToken changes
+  useEffect(() => {
+    setShowTrending(!selectedToken);
+  }, [selectedToken]);
   
   const fetchFromApi = useCallback(async (endpoint) => {
     try {
@@ -109,8 +115,8 @@ const App = () => {
                 </div>
                 <TokenStats />
               </div>
-            ) : (
-              <div className="animate-fadeIn">
+            ) : showTrending && (
+              <div key="trending" className="animate-fadeIn">
                 <TrendingTokens />
               </div>
             )}
