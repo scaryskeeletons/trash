@@ -2,12 +2,14 @@ import React, { useContext, useEffect, useState } from 'react';
 import { Users, Activity, PieChart, Wallet } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from './card';
 import { ApiContext } from '../App';
+import { Connection, PublicKey } from '@solana/web3.js';
 
 const getRPCHolderData = async (mintAddress) => {
   try {
     console.log('Fetching RPC data for mint:', mintAddress);
     
-    const response = await fetch(process.env.REACT_APP_RPC_URL, {      method: 'POST',
+    const response = await fetch(process.env.REACT_APP_RPC_URL, {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -37,25 +39,10 @@ const getRPCHolderData = async (mintAddress) => {
     });
 
     if (!response.ok) {
-      console.error('RPC HTTP Error:', response.status, response.statusText);
-      const errorText = await response.text();
-      console.error('Error response body:', errorText);
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    // Try to get the raw text first
-    const rawText = await response.text();
-    console.log('Raw response:', rawText);
-
-    // Then parse it
-    let data;
-    try {
-      data = JSON.parse(rawText);
-    } catch (parseError) {
-      console.error('JSON Parse Error:', parseError);
-      console.error('Failed to parse response:', rawText);
-      throw parseError;
-    }
+    const data = JSON.parse(await response.text());
     
     if (data.error) {
       console.error('RPC Error:', data.error);
@@ -63,6 +50,7 @@ const getRPCHolderData = async (mintAddress) => {
         accounts: [],
         totalHolders: 0,
         totalSupply: 0,
+        circulatingSupply: 0,
         status: 'error',
         errorDetails: data.error
       };
@@ -74,14 +62,33 @@ const getRPCHolderData = async (mintAddress) => {
         accounts: [],
         totalHolders: 0,
         totalSupply: 0,
+        circulatingSupply: 0,
         status: 'no_data'
       };
     }
 
-    const accounts = data.result.reduce((acc, account) => {
+    // Calculate total supply from all accounts first
+    const totalSupply = data.result.reduce((sum, account) => {
+      try {
+        const amount = account.account.data.parsed.info.tokenAmount.uiAmount;
+        return sum + (amount || 0);
+      } catch (e) {
+        console.warn('Error processing account for total supply:', e);
+        return sum;
+      }
+    }, 0);
+
+    console.log('Total Supply:', totalSupply);
+
+    // Filter accounts for holder statistics
+    const EXCLUDED_WALLET = '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1';
+    const PROGRAM_ID = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
+
+    let accounts = data.result.reduce((acc, account) => {
       try {
         const info = account.account.data.parsed.info;
-        if (info && info.tokenAmount && info.tokenAmount.uiAmount > 0) {
+        if (info && info.tokenAmount && info.tokenAmount.uiAmount > 0 && 
+            info.owner !== EXCLUDED_WALLET) {
           acc.push({
             wallet: info.owner,
             amount: info.tokenAmount.uiAmount,
@@ -90,23 +97,84 @@ const getRPCHolderData = async (mintAddress) => {
         }
         return acc;
       } catch (e) {
-        console.warn('Error processing account:', e, account);
+        console.warn('Error processing account:', e);
         return acc;
       }
     }, []);
 
-    const sortedAccounts = accounts.sort((a, b) => b.amount - a.amount);
-    const totalSupply = sortedAccounts.reduce((sum, acc) => sum + acc.amount, 0);
+    // Log all accounts with >1% holdings before program check
+    const significantHolders = accounts.filter(acc => 
+      (acc.amount / totalSupply) * 100 >= 1
+    );
 
-    const accountsWithPercentage = sortedAccounts.map(acc => ({
-      ...acc,
-      percentage: totalSupply > 0 ? (acc.amount / totalSupply) * 100 : 0
-    }));
+    console.log('Significant holders before program check:');
+    significantHolders.forEach(holder => {
+      console.log(`Wallet: ${holder.wallet}`);
+      console.log(`Amount: ${holder.amount}`);
+      console.log(`Percentage: ${(holder.amount / totalSupply * 100).toFixed(2)}%`);
+      console.log('---');
+    });
+
+    // Check program-owned accounts
+    if (accounts.length > 0) {
+      const connection = new Connection(process.env.REACT_APP_RPC_URL);
+      
+      const programOwnedChecks = await Promise.all(
+        significantHolders.map(async (acc) => {
+          try {
+            const accountInfo = await connection.getAccountInfo(new PublicKey(acc.wallet));
+            const owner = accountInfo?.owner.toBase58();
+            console.log(`Checking wallet ${acc.wallet}:`);
+            console.log(`Owner: ${owner}`);
+            console.log(`Is program owned: ${owner === PROGRAM_ID}`);
+            return owner === PROGRAM_ID;
+          } catch (error) {
+            console.warn(`Error checking program ownership for ${acc.wallet}:`, error);
+            return false;
+          }
+        })
+      );
+
+      const programOwnedWallets = new Set(
+        significantHolders
+          .filter((_, index) => programOwnedChecks[index])
+          .map(acc => acc.wallet)
+      );
+
+      console.log('Detected program-owned wallets:', Array.from(programOwnedWallets));
+
+      accounts = accounts.filter(acc => !programOwnedWallets.has(acc.wallet));
+    }
+
+    // Log remaining significant holders after filtering
+    const remainingSignificantHolders = accounts.filter(acc => 
+      (acc.amount / totalSupply) * 100 >= 1
+    );
+
+    console.log('Significant holders after program check:');
+    remainingSignificantHolders.forEach(holder => {
+      console.log(`Wallet: ${holder.wallet}`);
+      console.log(`Amount: ${holder.amount}`);
+      console.log(`Percentage: ${(holder.amount / totalSupply * 100).toFixed(2)}%`);
+      console.log('---');
+    });
+
+    // Calculate circulating supply from filtered accounts
+    const circulatingSupply = accounts.reduce((sum, acc) => sum + acc.amount, 0);
+
+    // Calculate percentages based on total supply
+    const accountsWithPercentage = accounts
+      .map(acc => ({
+        ...acc,
+        percentage: (acc.amount / totalSupply) * 100
+      }))
+      .sort((a, b) => b.amount - a.amount);
 
     return {
       accounts: accountsWithPercentage,
       totalHolders: accountsWithPercentage.length,
       totalSupply,
+      circulatingSupply,
       status: 'success'
     };
   } catch (error) {
@@ -115,10 +183,35 @@ const getRPCHolderData = async (mintAddress) => {
       accounts: [],
       totalHolders: 0,
       totalSupply: 0,
+      circulatingSupply: 0,
       status: 'error',
       errorDetails: error.message
     };
   }
+};
+
+const formatNumber = (num) => {
+  if (!num && num !== 0) return '0';
+  
+  // Check for billions
+  if (num >= 0.99e9) {
+    const billions = num / 1e9;
+    return billions % 1 === 0 ? `${billions.toFixed(0)}B` : `${Math.round(billions * 100) / 100}B`;
+  }
+  
+  // Check for millions
+  if (num >= 0.99e6) {
+    const millions = num / 1e6;
+    return millions % 1 === 0 ? `${millions.toFixed(0)}M` : `${Math.round(millions * 100) / 100}M`;
+  }
+  
+  // Check for thousands
+  if (num >= 0.99e3) {
+    const thousands = num / 1e3;
+    return thousands % 1 === 0 ? `${thousands.toFixed(0)}K` : `${Math.round(thousands * 100) / 100}K`;
+  }
+  
+  return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
 };
 
 const TokenStats = () => {
@@ -133,17 +226,18 @@ const TokenStats = () => {
 
       setLoading(true);
       try {
-        // Fetch trading stats
-        const statsData = await fetchFromApi(`/stats/${selectedToken.token.mint}`);
-        setTradingStats(statsData);
+        const [statsData, rpcData] = await Promise.all([
+          fetchFromApi(`/stats/${selectedToken.token.mint}`),
+          getRPCHolderData(selectedToken.token.mint)
+        ]);
 
-        // Fetch RPC data
-        const rpcData = await getRPCHolderData(selectedToken.token.mint);
+        setTradingStats(statsData);
 
         if (rpcData.status === 'success') {
           const holderMetrics = {
             totalHolders: rpcData.totalHolders,
             totalSupply: rpcData.totalSupply,
+            circulatingSupply: rpcData.circulatingSupply,
             topHolder: rpcData.accounts[0]?.percentage || 0,
             top10Holders: rpcData.accounts
               .slice(0, 10)
@@ -160,7 +254,7 @@ const TokenStats = () => {
               medium: rpcData.accounts.filter(h => h.percentage >= 0.01 && h.percentage < 0.1).length,
               small: rpcData.accounts.filter(h => h.percentage < 0.01).length
             },
-            averageHolding: rpcData.totalSupply / rpcData.totalHolders,
+            averageHolding: rpcData.circulatingSupply / rpcData.totalHolders,
             medianHolding: rpcData.accounts[Math.floor(rpcData.accounts.length / 2)]?.amount || 0
           };
           setHolderStats(holderMetrics);
@@ -176,8 +270,6 @@ const TokenStats = () => {
     fetchStats();
   }, [selectedToken, fetchFromApi]);
 
-  const stats24h = tradingStats?.['24h'] || {};
-
   const renderPercentage = (value) => {
     if (loading) return <span className="font-medium">Calculating...</span>;
     if (value === undefined || value === null) return <span className="font-medium">-</span>;
@@ -189,13 +281,7 @@ const TokenStats = () => {
     );
   };
 
-  const formatNumber = (num) => {
-    if (!num && num !== 0) return '0';
-    if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
-    if (num >= 1e6) return `${(num / 1e6).toFixed(2)}M`;
-    if (num >= 1e3) return `${(num / 1e3).toFixed(2)}K`;
-    return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  };
+  const stats24h = tradingStats?.['24h'] || {};
 
   if (!selectedToken) return null;
 
