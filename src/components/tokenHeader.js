@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useContext, useEffect, useRef } from 'react';
 import { Search } from 'lucide-react';
 import { ApiContext } from '../App';
 import { Card, CardContent } from './card';
@@ -6,14 +6,15 @@ import { Card, CardContent } from './card';
 const TokenHeader = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  const [showResults, setShowResults] = useState(false);
   const { fetchFromApi, setSelectedToken } = useContext(ApiContext);
+  const searchContainerRef = useRef(null);
+  const cachedResultsRef = useRef(null);
 
-  // Helper function to truncate address
   const truncateAddress = (address) => {
     return `${address.slice(0, 4)}...${address.slice(-4)}`;
   };
 
-  // Helper function to format market cap
   const formatMarketCap = (marketCap) => {
     if (!marketCap) return 'N/A';
     if (marketCap >= 1e9) return `$${(marketCap / 1e9).toFixed(2)}B`;
@@ -23,17 +24,35 @@ const TokenHeader = () => {
   };
 
   useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) {
+        setShowResults(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
     const searchTokens = async () => {
       if (!searchQuery) {
         setSearchResults([]);
+        cachedResultsRef.current = null;
         return;
       }
       try {
         const data = await fetchFromApi(`/search?query=${searchQuery}&limit=5`);
-        setSearchResults(data.data || []);
+        const results = data.data || [];
+        setSearchResults(results);
+        cachedResultsRef.current = results;
+        setShowResults(true);
       } catch (error) {
         console.error('Search error:', error);
         setSearchResults([]);
+        cachedResultsRef.current = null;
       }
     };
 
@@ -47,13 +66,22 @@ const TokenHeader = () => {
       setSelectedToken(tokenData);
       setSearchQuery('');
       setSearchResults([]);
+      setShowResults(false);
+      cachedResultsRef.current = null;
     } catch (error) {
       console.error('Token fetch error:', error);
     }
   };
 
+  const handleInputFocus = () => {
+    if (cachedResultsRef.current) {
+      setSearchResults(cachedResultsRef.current);
+      setShowResults(true);
+    }
+  };
+
   return (
-    <div className="relative z-50">
+    <div className="relative z-50" ref={searchContainerRef}>
       <Card>
         <CardContent>
           <div className="relative">
@@ -66,13 +94,14 @@ const TokenHeader = () => {
                          placeholder:text-gray-500 dark:placeholder:text-gray-400"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={handleInputFocus}
               />
             </div>
           </div>
         </CardContent>
       </Card>
       
-      {searchResults.length > 0 && (
+      {showResults && searchResults.length > 0 && (
         <div className="absolute w-full mt-1 z-50">
           <Card className="w-full">
             <CardContent className="p-0">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useMemo } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from './card';
 import { ApiContext } from '../App';
 import { Alert, AlertTitle, AlertDescription } from './alert';
@@ -11,7 +11,7 @@ const TIMEFRAMES = {
   '1H': '1h',
   '6H': '6h',
   '12H': '12h',
-  '24H': '24h',
+  '24H': '24h'
 };
 
 const TokenImage = ({ src, alt }) => {
@@ -39,37 +39,61 @@ const TrendingTokens = () => {
   const [selectedTimeframe, setSelectedTimeframe] = useState('5M');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [sortConfig, setSortConfig] = useState({
-    key: 'rank',
-    direction: 'asc'
-  });
+  const [sortConfig, setSortConfig] = useState({ key: 'rank', direction: 'asc' });
   const [aiDirection, setAiDirection] = useState('best');
 
-  useEffect(() => {
-    const fetchTrendingTokens = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const endpoint = `/tokens/trending/${TIMEFRAMES[selectedTimeframe]}`;
-        const data = await fetchFromApi(endpoint);
-        
-        const validTokens = data.filter(token => 
-          token?.token?.mint && 
-          token?.token?.name && 
-          token?.pools?.[0]?.price?.usd !== undefined
-        );
+  const abortControllerRef = useRef(null);
+  const cache = useRef({});
 
-        setTokens(validTokens);
-      } catch (err) {
-        setError('Failed to fetch trending tokens');
-        console.error('Error fetching trending tokens:', err);
-      } finally {
+  const fetchTokens = useCallback(async () => {
+    // Create new controller for this fetch
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      if (cache.current[selectedTimeframe]) {
+        setTokens(cache.current[selectedTimeframe]);
+      } else {
+        setLoading(true);
+      }
+
+      const endpoint = `/tokens/trending/${TIMEFRAMES[selectedTimeframe]}`;
+      const data = await fetchFromApi(endpoint, { 
+        signal: controller.signal
+      });
+      
+      // Check if this request was aborted
+      if (controller.signal.aborted) return;
+      
+      const validTokens = data.filter(token => 
+        token?.token?.mint && 
+        token?.pools?.length > 0 &&
+        token?.pools[0]?.price?.usd !== undefined
+      );
+
+      cache.current[selectedTimeframe] = validTokens;
+      setTokens(validTokens);
+      setError(null); // Clear any previous errors
+    } catch (err) {
+      // Only handle errors if this request wasn't aborted
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        // Clear error if request was intentionally aborted
+        setError(null);
+        return;
+      }
+      setError('Failed to fetch trending tokens');
+      console.error('Error fetching trending tokens:', err);
+    } finally {
+      // Only clear loading if this was the last request
+      if (abortControllerRef.current === controller) {
         setLoading(false);
       }
-    };
+    }
+  }, [fetchFromApi, selectedTimeframe]);
 
-    fetchTrendingTokens();
-  }, [selectedTimeframe, fetchFromApi]);
+  useEffect(() => {
+    fetchTokens();
+  }, [selectedTimeframe, fetchTokens]);
 
   const handleSort = (key) => {
     setSortConfig(prevConfig => ({
@@ -141,77 +165,56 @@ const TrendingTokens = () => {
     );
   };
 
-  const sortData = (data, key, direction) => {
-    return [...data].sort((a, b) => {
-      let compareA, compareB;
-
-      if (key === 'aiRank') {
-        compareA = a.aiRank || Number.MAX_VALUE;
-        compareB = b.aiRank || Number.MAX_VALUE;
-      } else {
-        compareA = a[key];
-        compareB = b[key];
-      }
-
-      if (key === 'rank') {
-        return direction === 'asc' ? compareA - compareB : compareB - compareA;
-      }
-
-      if (key === 'name') {
-        compareA = a.name.toLowerCase();
-        compareB = b.name.toLowerCase();
-        return direction === 'asc' 
-          ? compareA.localeCompare(compareB)
-          : compareB.localeCompare(compareA);
-      }
-
-      if (typeof compareA === 'number' && typeof compareB === 'number') {
-        return direction === 'asc' ? compareA - compareB : compareB - compareA;
-      }
-
-      return 0;
-    });
-  };
-
-  const processedTokens = useMemo(() => {
-    const processed = tokens.map((token, index) => {
-      const priceChange = token.events?.[TIMEFRAMES[selectedTimeframe]]?.priceChangePercentage || 0;
-      const price = token.pools?.[0]?.price?.usd || 0;
-      const marketCap = token.pools?.[0]?.marketCap?.usd || 0;
-      
-      return {
-        rank: index + 1,
-        mint: token.token.mint,
-        name: token.token.name,
-        symbol: token.token.symbol,
-        image: token.token.image !== '/placeholder.png' ? token.token.image : null,
-        price,
-        marketCap,
-        priceChange,
-        aiRank: token.aiRank,
-        fullToken: token
-      };
-    });
-
-    return sortData(processed, sortConfig.key, sortConfig.direction);
-  }, [tokens, selectedTimeframe, sortConfig]);
-
   const getAIRankDisplay = (rank) => {
     if (!rank || rank === Number.MAX_VALUE) return '-';
     return (
       <span className={`font-medium ${
         aiDirection === 'best' 
-          ? rank <= processedTokens.length / 3 ? 'text-green-500' 
-            : rank <= (2 * processedTokens.length) / 3 ? 'text-yellow-500' 
+          ? rank <= tokens.length / 3 ? 'text-green-500' 
+            : rank <= (2 * tokens.length) / 3 ? 'text-yellow-500' 
             : 'text-red-500'
-          : rank <= processedTokens.length / 3 ? 'text-red-500'
-            : rank <= (2 * processedTokens.length) / 3 ? 'text-yellow-500'
+          : rank <= tokens.length / 3 ? 'text-red-500'
+            : rank <= (2 * tokens.length) / 3 ? 'text-yellow-500'
             : 'text-green-500'
       }`}>
         {rank}
       </span>
     );
   };
+
+  const processedTokens = useMemo(() => {
+    return tokens.map((token, index) => ({
+      rank: index + 1,
+      mint: token.token.mint,
+      name: token.token.name,
+      symbol: token.token.symbol,
+      image: token.token.image,
+      price: token.pools[0]?.price?.usd || 0,
+      marketCap: token.pools[0]?.marketCap?.usd || 0,
+      priceChange: token.events?.[TIMEFRAMES[selectedTimeframe]]?.priceChangePercentage || 0,
+      aiRank: token.aiRank,
+      fullToken: token
+    }));
+  }, [tokens, selectedTimeframe]);
+
+  const sortedTokens = useMemo(() => {
+    const { key, direction } = sortConfig;
+    return [...processedTokens].sort((a, b) => {
+      if (key === 'aiRank') {
+        const aRank = a.aiRank || Number.MAX_VALUE;
+        const bRank = b.aiRank || Number.MAX_VALUE;
+        return direction === 'asc' ? aRank - bRank : bRank - aRank;
+      }
+      if (key === 'rank') return direction === 'asc' ? a.rank - b.rank : b.rank - a.rank;
+      if (key === 'name') return direction === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+      if (key === 'priceChange') {
+        const aChange = parseFloat(a.priceChange) || 0;
+        const bChange = parseFloat(b.priceChange) || 0;
+        return direction === 'asc' ? aChange - bChange : bChange - aChange;
+      }
+      return direction === 'asc' ? a[key] - b[key] : b[key] - a[key];
+    });
+  }, [processedTokens, sortConfig]);
 
   if (error) {
     return (
@@ -232,7 +235,10 @@ const TrendingTokens = () => {
       <Card className="mt-6">
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-            <CardTitle>Trending Tokens ({processedTokens.length})</CardTitle>
+            <CardTitle>
+              Trending Tokens ({sortedTokens.length})
+              {loading && <span className="ml-2 text-sm text-[var(--theme-text-secondary)]">Refreshing...</span>}
+            </CardTitle>
             <div className="flex flex-wrap gap-2">
               {Object.keys(TIMEFRAMES).map((timeframe) => (
                 <button
@@ -251,7 +257,7 @@ const TrendingTokens = () => {
           </div>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {loading && !tokens.length ? (
             <div className="flex justify-center items-center h-64">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--theme-accent)]"></div>
             </div>
@@ -261,47 +267,48 @@ const TrendingTokens = () => {
                 <thead>
                   <tr className="border-b border-[var(--theme-border)]">
                     <th 
+                      onClick={() => handleSort('rank')}
                       className="group text-left py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                     >
                       # <SortIcon column="rank" />
                     </th>
                     <th 
-                      className="group text-left py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                       onClick={() => handleSort('name')}
+                      className="group text-left py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                     >
                       Token <SortIcon column="name" />
                     </th>
                     <th 
-                      className="group text-right py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                       onClick={() => handleSort('price')}
+                      className="group text-right py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                     >
                       Price <SortIcon column="price" />
                     </th>
                     <th 
-                      className="group text-right py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                       onClick={() => handleSort('marketCap')}
+                      className="group text-right py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                     >
                       Market Cap <SortIcon column="marketCap" />
                     </th>
                     <th 
-                      className="group text-right py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                       onClick={() => handleSort('priceChange')}
+                      className="group text-right py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                     >
                       {selectedTimeframe} Change <SortIcon column="priceChange" />
                     </th>
                     <th 
-                      className="group text-right py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                       onClick={() => handleSort('aiRank')}
+                      className="group text-right py-4 px-4 text-sm font-medium text-[var(--theme-text-secondary)] cursor-pointer hover:text-[var(--theme-text-primary)]"
                     >
                       AI Rank <SortIcon column="aiRank" />
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {processedTokens.map((token, index) => (
+                  {sortedTokens.map((token) => (
                     <tr
-                      key={`${token.mint}-${TIMEFRAMES[selectedTimeframe]}-${index}`}
-                      onClick={() => setSelectedToken(token.fullToken)}
+                      key={token.mint}
+                      onClick={() => handleTokenSelect(token)}
                       className="border-b border-[var(--theme-border)] hover:bg-[var(--theme-bg-secondary)] cursor-pointer transition-colors"
                     >
                       <td className="py-4 px-4 text-sm text-[var(--theme-text-secondary)]">
