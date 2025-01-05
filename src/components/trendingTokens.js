@@ -47,7 +47,7 @@ const TrendingTokens = () => {
     try {
       setLoading(true);
       const endpoint = `/tokens/trending/${TIMEFRAMES[selectedTimeframe]}`;
-      const response = await fetchFromApi(endpoint);
+      const data = await fetchFromApi(endpoint);
       console.log('Full response:', response); // Add this to debug
       
       const validTokens = data.filter(token => 
@@ -58,7 +58,7 @@ const TrendingTokens = () => {
       setTokens(validTokens);
     } catch (err) {
       console.error('Error fetching trending tokens:', err);
-      console.error('Error response:', err.response); // Add this to debug
+      console.error('Error response:', err.data); // Add this to debug
       setError('Failed to fetch trending tokens');
     } finally {
       setLoading(false);
