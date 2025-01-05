@@ -17,16 +17,45 @@ const TIMEFRAMES = {
 const TokenImage = ({ src, alt }) => {
   const [hasError, setHasError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const imageRef = useRef(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setShouldLoad(true);
+            observer.disconnect();
+          }
+        });
+      },
+      {
+        rootMargin: '50px',
+        threshold: 0.1
+      }
+    );
+
+    if (imageRef.current) {
+      observer.observe(imageRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <div className="w-8 h-8 rounded-full bg-[var(--theme-bg-tertiary)] flex items-center justify-center">
-      {src && !hasError && (
+    <div 
+      ref={imageRef}
+      className="w-8 h-8 rounded-full bg-[var(--theme-bg-tertiary)] flex items-center justify-center"
+    >
+      {src && !hasError && shouldLoad && (
         <img
           src={src}
           alt={alt}
           className={`w-8 h-8 rounded-full ${isLoading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
           onError={() => setHasError(true)}
           onLoad={() => setIsLoading(false)}
+          loading="lazy"
         />
       )}
     </div>
@@ -46,7 +75,6 @@ const TrendingTokens = () => {
   const cache = useRef({});
 
   const fetchTokens = useCallback(async () => {
-    // Create new controller for this fetch
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -62,7 +90,6 @@ const TrendingTokens = () => {
         signal: controller.signal
       });
       
-      // Check if this request was aborted
       if (controller.signal.aborted) return;
       
       const validTokens = data.filter(token => 
@@ -73,18 +100,15 @@ const TrendingTokens = () => {
 
       cache.current[selectedTimeframe] = validTokens;
       setTokens(validTokens);
-      setError(null); // Clear any previous errors
+      setError(null);
     } catch (err) {
-      // Only handle errors if this request wasn't aborted
       if (err.name === 'AbortError' || controller.signal.aborted) {
-        // Clear error if request was intentionally aborted
         setError(null);
         return;
       }
       setError('Failed to fetch trending tokens');
       console.error('Error fetching trending tokens:', err);
     } finally {
-      // Only clear loading if this was the last request
       if (abortControllerRef.current === controller) {
         setLoading(false);
       }
@@ -93,6 +117,11 @@ const TrendingTokens = () => {
 
   useEffect(() => {
     fetchTokens();
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [selectedTimeframe, fetchTokens]);
 
   const handleSort = (key) => {
