@@ -77,27 +77,43 @@ const TrendingTokens = () => {
   const fetchTokens = useCallback(async () => {
     const controller = new AbortController();
     abortControllerRef.current = controller;
-
+  
     try {
       if (cache.current[selectedTimeframe]) {
         setTokens(cache.current[selectedTimeframe]);
       } else {
         setLoading(true);
       }
-
+  
       const endpoint = `/tokens/trending/${TIMEFRAMES[selectedTimeframe]}`;
-      const data = await fetchFromApi(endpoint, { 
-        signal: controller.signal
+      const response = await fetchFromApi(endpoint, { 
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
       });
-      
+  
       if (controller.signal.aborted) return;
+  
+      // Check if response is OK and is JSON
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+  
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error("Response was not JSON");
+      }
+  
+      const data = await response.json();
       
       const validTokens = data.filter(token => 
         token?.token?.mint && 
         token?.pools?.length > 0 &&
         token?.pools[0]?.price?.usd !== undefined
       );
-
+  
       cache.current[selectedTimeframe] = validTokens;
       setTokens(validTokens);
       setError(null);
@@ -106,7 +122,7 @@ const TrendingTokens = () => {
         setError(null);
         return;
       }
-      setError('Failed to fetch trending tokens');
+      setError(`Failed to fetch trending tokens: ${err.message}`);
       console.error('Error fetching trending tokens:', err);
     } finally {
       if (abortControllerRef.current === controller) {
@@ -114,15 +130,6 @@ const TrendingTokens = () => {
       }
     }
   }, [fetchFromApi, selectedTimeframe]);
-
-  useEffect(() => {
-    fetchTokens();
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, [selectedTimeframe, fetchTokens]);
 
   const handleSort = (key) => {
     setSortConfig(prevConfig => ({
