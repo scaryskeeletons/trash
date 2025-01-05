@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState, useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from './card';
 import { ApiContext } from '../App';
 
@@ -70,50 +70,64 @@ const calculateDomain = (data, key, padding = 0.05) => {
   ];
 };
 
+const DEMO_WALLET = "";
+
 const PriceChart = () => {
   const { selectedToken, fetchFromApi } = useContext(ApiContext);
   const [rawChartData, setRawChartData] = useState([]);
   const [selectedInterval, setSelectedInterval] = useState('24H');
   const [isMarketCap, setIsMarketCap] = useState(false);
+  const [trades, setTrades] = useState([]);
   const decimals = selectedToken?.token?.decimals || 6;
   
-  // Get total supply from the API response
   const totalSupply = useMemo(() => 
     selectedToken?.pools?.[0]?.tokenSupply || 0,
     [selectedToken]
   );
 
   useEffect(() => {
-    const fetchChartData = async () => {
+    const fetchData = async () => {
       if (!selectedToken) return;
-
       try {
-        const data = await fetchFromApi(
-          `/chart/${selectedToken.token.mint}?type=${INTERVALS[selectedInterval]}`
-        );
+        const [chartResponse, tradesResponse] = await Promise.all([
+          fetchFromApi(`/chart/${selectedToken.token.mint}?type=${INTERVALS[selectedInterval]}`),
+          fetchFromApi(`/trades/${selectedToken.token.mint}/by-wallet/${DEMO_WALLET}?parseJupiter=true`)
+        ]);
         
-        if (data?.oclhv) {
-          setRawChartData(data.oclhv);
+        if (chartResponse?.oclhv) {
+          setRawChartData(chartResponse.oclhv);
+        }
+        
+        if (tradesResponse?.trades) {
+          const processedTrades = tradesResponse.trades.map(trade => ({
+            time: Math.floor(trade.time / 1000),
+            type: trade.type.toUpperCase(),
+            tokenAmount: trade.amount,
+            usdValue: trade.volume,
+            volumeSol: trade.volumeSol,
+            priceUsd: trade.priceUsd,
+            program: trade.program,
+            tx: trade.tx
+          }));
+          setTrades(processedTrades);
         }
       } catch (error) {
-        console.error('Chart data fetch error:', error);
+        console.error('Data fetch error:', error);
       }
     };
 
-    fetchChartData();
+    fetchData();
   }, [selectedToken, selectedInterval, fetchFromApi]);
 
-  // First memo: Process raw data and calculate base values
   const processedChartData = useMemo(() => {
     return rawChartData
       .map(point => {
         const price = parseFloat(point.close);
         if (!price || price <= 0 || isNaN(price)) return null;
         
-        // Calculate market cap using total supply from API
         const marketCap = price * totalSupply;
-        // Include volume from the OCLHV data
         const volume = parseFloat(point.volume) || 0;
+        
         return {
           time: point.time,
           price,
@@ -125,7 +139,6 @@ const PriceChart = () => {
       .filter(Boolean);
   }, [rawChartData, totalSupply]);
   
-  // Second memo: Handle display value switching without recreating entire dataset
   const displayData = useMemo(() => {
     return processedChartData.map(point => ({
       ...point,
@@ -138,25 +151,68 @@ const PriceChart = () => {
     [displayData]
   );
 
+  const transactions = useMemo(() => {
+    if (!displayData.length || !trades.length) return [];
+    
+    const startTime = displayData[0]?.time;
+    const endTime = displayData[displayData.length - 1]?.time;
+    
+    const filteredTrades = trades.filter(trade => 
+      trade.time >= startTime && trade.time <= endTime
+    );
+    
+    return filteredTrades;
+  }, [displayData, trades]);
+
   if (!selectedToken) return null;
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
-      const { price, marketCap, volume } = payload[0].payload;
+      const data = payload[0].payload;
+      const volume = data.volume;
+      
+      // Find exact transaction match for hovering over dots
+      const transaction = transactions.find(t => {
+        const matchingDataPoint = displayData.reduce((closest, current) => {
+          const currentDiff = Math.abs(current.time - t.time);
+          const closestDiff = Math.abs(closest.time - t.time);
+          return currentDiff < closestDiff ? current : closest;
+        }, displayData[0]);
+        
+        return matchingDataPoint && Math.abs(matchingDataPoint.time - label) < 1;
+      });
+
       return (
         <div className="bg-[var(--theme-bg-secondary)] border border-[var(--theme-border)] p-3 rounded-lg">
           <p className="text-sm text-[var(--theme-text-secondary)] mb-1">
             {formatTime(label, selectedInterval)}
           </p>
           <p className="text-sm font-bold text-[var(--theme-text-primary)] mt-1">
-            Price: ${formatValue(price, decimals)}
+            Price: ${formatValue(data.price, decimals)}
           </p>
-          <p className="text-sm font-bold text-[var(--theme-text-primary)] mt-1">
-            MCap: ${formatValue(marketCap, 2, true)}
+          <p className="text-sm font-bold text-[var(--theme-text-primary)]">
+            Market Cap: ${formatValue(data.marketCap, 2, true)}
           </p>
-          <p className="text-sm font-bold text-[var(--theme-text-primary)] mt-1">
-            Vol: ${formatValue(volume, 2, true)}
+          <p className="text-sm text-[var(--theme-text-secondary)]">
+            Volume: ${formatValue(volume, 2)}
           </p>
+          {transaction && (
+            <>
+              <div className="h-px bg-[var(--theme-border)] my-2" />
+              <p className="text-sm font-bold text-[var(--theme-text-primary)]">
+                {transaction.type}: {formatValue(transaction.tokenAmount, decimals)} tokens
+              </p>
+              <p className="text-sm font-bold text-[var(--theme-text-primary)]">
+                USD: ${formatValue(transaction.usdValue, 2)}
+              </p>
+              <p className="text-sm font-bold text-[var(--theme-text-primary)]">
+                SOL: ◎{transaction.volumeSol}
+              </p>
+              <p className="text-sm text-[var(--theme-text-secondary)]">
+                via {transaction.program}
+              </p>
+            </>
+          )}
         </div>
       );
     }
@@ -198,8 +254,8 @@ const PriceChart = () => {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="h-96 w-full">
-          <ResponsiveContainer>
+        <div className="h-96 w-full relative">
+          <ResponsiveContainer style={{ position: 'relative', zIndex: 1 }}>
             <LineChart
               data={displayData}
               margin={{ top: 10, right: 30, left: 20, bottom: 5 }}
@@ -220,14 +276,13 @@ const PriceChart = () => {
               />
               <YAxis 
                 domain={yDomain}
-                tickFormatter={(value) => `$${formatValue(value, decimals, isMarketCap)}`}
+                tickFormatter={(value) => `${formatValue(value, decimals, isMarketCap)}`}
                 scale="linear"
                 width={80}
                 padding={{ top: 20, bottom: 20 }}
                 tick={{ fill: 'var(--theme-text-secondary)', fontSize: 12 }}
                 axisLine={{ stroke: 'var(--theme-border)' }}
               />
-              <Tooltip content={<CustomTooltip />} />
               <Line
                 type="monotone"
                 dataKey="displayValue"
@@ -236,6 +291,40 @@ const PriceChart = () => {
                 dot={false}
                 animationDuration={300}
               />
+              <Tooltip 
+                content={<CustomTooltip />}
+                cursor={false} 
+              />
+              {transactions.map((tx) => {
+                // Find closest data point
+                const matchingDataPoint = displayData.reduce((closest, current) => {
+                  const currentDiff = Math.abs(current.time - tx.time);
+                  const closestDiff = Math.abs(closest.time - tx.time);
+                  return currentDiff < closestDiff ? current : closest;
+                }, displayData[0]);
+
+                if (matchingDataPoint) {
+                  console.log('Transaction dot:', {
+                    time: tx.time,
+                    displayTime: matchingDataPoint.time,
+                    price: matchingDataPoint.displayValue,
+                    type: tx.type
+                  });
+                  
+                  return (
+                    <ReferenceDot
+                      key={tx.tx}
+                      x={matchingDataPoint.time}
+                      y={matchingDataPoint.displayValue}
+                      r={6}
+                      fill={tx.type === 'BUY' ? '#22c55e' : '#ef4444'}
+                      stroke="white"
+                      strokeWidth={2}
+                    />
+                  );
+                }
+                return null;
+              })}
             </LineChart>
           </ResponsiveContainer>
         </div>
