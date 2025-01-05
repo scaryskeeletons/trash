@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from './card';
 import { ApiContext } from '../App';
 import { Alert, AlertTitle, AlertDescription } from './alert';
@@ -17,38 +17,10 @@ const TIMEFRAMES = {
 const TokenImage = ({ src, alt }) => {
   const [hasError, setHasError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [shouldLoad, setShouldLoad] = useState(false);
-  const imageRef = useRef(null);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            setShouldLoad(true);
-            observer.disconnect();
-          }
-        });
-      },
-      {
-        rootMargin: '50px',
-        threshold: 0.1
-      }
-    );
-
-    if (imageRef.current) {
-      observer.observe(imageRef.current);
-    }
-
-    return () => observer.disconnect();
-  }, []);
 
   return (
-    <div 
-      ref={imageRef}
-      className="w-8 h-8 rounded-full bg-[var(--theme-bg-tertiary)] flex items-center justify-center"
-    >
-      {src && !hasError && shouldLoad && (
+    <div className="w-8 h-8 rounded-full bg-[var(--theme-bg-tertiary)] flex items-center justify-center">
+      {src && !hasError && (
         <img
           src={src}
           alt={alt}
@@ -72,64 +44,29 @@ const TrendingTokens = () => {
   const [aiDirection, setAiDirection] = useState('best');
 
   const fetchTokens = useCallback(async () => {
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-  
     try {
-      if (cache.current[selectedTimeframe]) {
-        setTokens(cache.current[selectedTimeframe]);
-      } else {
-        setLoading(true);
-      }
-  
+      setLoading(true);
       const endpoint = `/tokens/trending/${TIMEFRAMES[selectedTimeframe]}`;
-      let data;
-      try {
-        data = await fetchFromApi(endpoint, { 
-          signal: controller.signal
-        });
-      } catch (fetchError) {
-        console.error('Fetch error:', fetchError);
-        throw new Error('API request failed');
-      }
+      const data = await fetchFromApi(endpoint);
       
-      if (controller.signal.aborted) return;
-      
-      if (!Array.isArray(data)) {
-        console.error('Invalid data format:', data);
-        throw new Error('Invalid data format received');
-      }
-  
       const validTokens = data.filter(token => 
         token?.token?.mint && 
         token?.pools?.length > 0 &&
         token?.pools[0]?.price?.usd !== undefined
       );
-  
-      cache.current[selectedTimeframe] = validTokens;
+
       setTokens(validTokens);
       setError(null);
     } catch (err) {
-      if (err.name === 'AbortError' || controller.signal.aborted) {
-        setError(null);
-        return;
-      }
       setError('Failed to fetch trending tokens');
       console.error('Error fetching trending tokens:', err);
     } finally {
-      if (abortControllerRef.current === controller) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, [fetchFromApi, selectedTimeframe]);
 
   useEffect(() => {
     fetchTokens();
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
   }, [selectedTimeframe, fetchTokens]);
 
   const handleSort = (key) => {
