@@ -71,9 +71,6 @@ const TrendingTokens = () => {
   const [sortConfig, setSortConfig] = useState({ key: 'rank', direction: 'asc' });
   const [aiDirection, setAiDirection] = useState('best');
 
-  const abortControllerRef = useRef(null);
-  const cache = useRef({});
-
   const fetchTokens = useCallback(async () => {
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -86,28 +83,23 @@ const TrendingTokens = () => {
       }
   
       const endpoint = `/tokens/trending/${TIMEFRAMES[selectedTimeframe]}`;
-      const response = await fetchFromApi(endpoint, { 
-        signal: controller.signal,
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      });
-  
-      if (controller.signal.aborted) return;
-  
-      // Check if response is OK and is JSON
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      let data;
+      try {
+        data = await fetchFromApi(endpoint, { 
+          signal: controller.signal
+        });
+      } catch (fetchError) {
+        console.error('Fetch error:', fetchError);
+        throw new Error('API request failed');
       }
-  
-      const contentType = response.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        throw new Error("Response was not JSON");
-      }
-  
-      const data = await response.json();
       
+      if (controller.signal.aborted) return;
+      
+      if (!Array.isArray(data)) {
+        console.error('Invalid data format:', data);
+        throw new Error('Invalid data format received');
+      }
+  
       const validTokens = data.filter(token => 
         token?.token?.mint && 
         token?.pools?.length > 0 &&
@@ -122,7 +114,7 @@ const TrendingTokens = () => {
         setError(null);
         return;
       }
-      setError(`Failed to fetch trending tokens: ${err.message}`);
+      setError('Failed to fetch trending tokens');
       console.error('Error fetching trending tokens:', err);
     } finally {
       if (abortControllerRef.current === controller) {
@@ -130,6 +122,15 @@ const TrendingTokens = () => {
       }
     }
   }, [fetchFromApi, selectedTimeframe]);
+
+  useEffect(() => {
+    fetchTokens();
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [selectedTimeframe, fetchTokens]);
 
   const handleSort = (key) => {
     setSortConfig(prevConfig => ({
