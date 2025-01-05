@@ -8,11 +8,11 @@ import TrendingTokens from './components/trendingTokens';
 import { Alert, AlertDescription } from './components/alert';
 
 export const ApiContext = createContext();
+export const ThemeContext = createContext();
 
 const SOL_API_KEY = process.env.REACT_APP_SOL_API_KEY;
 const SOL_API_BASE_URL = process.env.REACT_APP_SOL_API_BASE_URL;
 
-// Create a stable headers object that won't change between renders
 const API_HEADERS = {
   'x-api-key': SOL_API_KEY
 };
@@ -21,6 +21,31 @@ const App = () => {
   const [selectedToken, setSelectedToken] = useState(null);
   const [error, setError] = useState(null);
   const [showTrending, setShowTrending] = useState(true);
+  
+  // Force dark theme on mount
+  useEffect(() => {
+    // Remove any existing theme classes
+    document.documentElement.classList.remove('light');
+    document.documentElement.classList.add('dark');
+    
+    // Disable system preference media query
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    media.removeEventListener('change', () => {});
+    
+    // Override any attempt to change the theme
+    const observer = new MutationObserver(() => {
+      if (!document.documentElement.classList.contains('dark')) {
+        document.documentElement.classList.add('dark');
+      }
+    });
+    
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+    
+    return () => observer.disconnect();
+  }, []);
   
   useEffect(() => {
     setShowTrending(!selectedToken);
@@ -63,27 +88,27 @@ const App = () => {
 
   return (
     <ApiContext.Provider value={contextValue}>
-      <div className="relative min-h-screen bg-slate-50 dark:bg-slate-900">
+      <div className="relative min-h-screen bg-[var(--theme-bg-primary)]">
         <div className="absolute inset-0 z-0">
           <div className="w-full h-full">
-            <div className="absolute inset-0 border-slate-200 dark:border-slate-800" 
+            <div className="absolute inset-0 border-[var(--theme-border)]" 
                  style={{
                    background: `
                      linear-gradient(90deg, 
                        transparent 0%, 
                        transparent calc(100% - 1px), 
-                       rgba(148, 163, 184, 0.1) calc(100% - 1px)
+                       var(--theme-border-light) calc(100% - 1px)
                      )`,
                    backgroundSize: '4rem 100%'
                  }}>
             </div>
-            <div className="absolute inset-0 border-slate-200 dark:border-slate-800" 
+            <div className="absolute inset-0 border-[var(--theme-border)]" 
                  style={{
                    background: `
                      linear-gradient(0deg, 
                        transparent 0%, 
                        transparent calc(100% - 1px), 
-                       rgba(148, 163, 184, 0.1) calc(100% - 1px)
+                       var(--theme-border-light) calc(100% - 1px)
                      )`,
                    backgroundSize: '100% 4rem'
                  }}>

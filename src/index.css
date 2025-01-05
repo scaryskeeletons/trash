@@ -4,6 +4,9 @@
 
 /* Theme Variables */
 :root {
+  color-scheme: dark;
+  forced-color-adjust: none;
+  
   /* Core Theme Colors */
   --theme-bg-primary: #0a0b0d;
   --theme-bg-secondary: #111215;
@@ -32,6 +35,23 @@
   --theme-chart-grid: rgba(255, 255, 255, 0.06);
   --theme-chart-tooltip: #1a1d20;
 }
+
+html {
+  forced-color-adjust: none;
+  background-color: var(--theme-bg-primary);
+  color: var(--theme-text-primary);
+}
+
+/* Override any light mode attempts */
+:root,
+:root[data-theme="light"],
+[data-theme="light"] {
+  color-scheme: dark !important;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* Base Styles */
 body {
